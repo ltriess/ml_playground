@@ -1,4 +1,5 @@
 import math
+from typing import Tuple
 
 import torch
 from attention import MultiHeadAttention
@@ -18,7 +19,7 @@ class PositionWiseFeedForward(nn.Module):
         self.fc2 = nn.Linear(d_ff, d_model)
         self.relu = nn.ReLU()
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.fc2(self.relu(self.fc1(x)))
 
 
@@ -43,7 +44,7 @@ class PositionalEncoding(nn.Module):
 
         self.register_buffer("pe", pe.unsqueeze(0))
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x + self.pe[:, : x.size(1)]
 
 
@@ -108,11 +109,111 @@ class DecoderLayer(nn.Module):
         return x
 
 
-if __name__ == "__main__":
-    positional_encoding = PositionalEncoding(d_model=512, max_seq_length=1000)
-    encoder_layer = EncoderLayer(d_model=512, num_heads=8, d_ff=128, dropout=0.5)
-    decoder_layer = DecoderLayer(d_model=512, num_heads=8, d_ff=128, dropout=0.5)
+class Transformer(nn.Module):
+    """The transformer architecture.
 
-    print(positional_encoding)
-    print(encoder_layer)
-    print(decoder_layer)
+    1. Generate source and target masks using the generate_mask method.
+    2. Compute source and target embeddings, and apply positional encoding and dropout.
+    3. Process the source sequence through encoder layers, updating the enc_output tensor.
+    4. Process the target sequence through decoder layers, using enc_output and masks,
+       and updating the dec_output tensor.
+    5. Apply the linear projection layer to the decoder output, obtaining output logits.
+    """
+
+    def __init__(
+        self,
+        src_vocab_size,
+        tgt_vocab_size,
+        d_model,
+        num_heads,
+        num_layers,
+        d_ff,
+        max_seq_length,
+        dropout,
+    ):
+        super().__init__()
+
+        self.encoder_embedding = nn.Embedding(src_vocab_size, d_model)
+        self.decoder_embedding = nn.Embedding(tgt_vocab_size, d_model)
+        self.positional_encoding = PositionalEncoding(d_model, max_seq_length)
+
+        self.encoder_layers = nn.ModuleList(
+            [EncoderLayer(d_model, num_heads, d_ff, dropout) for _ in range(num_layers)]
+        )
+        self.decoder_layers = nn.ModuleList(
+            [DecoderLayer(d_model, num_heads, d_ff, dropout) for _ in range(num_layers)]
+        )
+
+        self.linear = nn.Linear(d_model, tgt_vocab_size)
+        self.dropout = nn.Dropout(dropout)
+
+    def generate_mask(
+        self, src: torch.Tensor, tgt: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        src_mask = (src != 0).unsqueeze(1).unsqueeze(2)
+        tgt_mask = (tgt != 0).unsqueeze(1).unsqueeze(3)
+        seq_length = tgt.size(1)
+        nopeak_mask = (
+            1 - torch.triu(torch.ones(1, seq_length, seq_length), diagonal=1)
+        ).bool()
+        tgt_mask = tgt_mask & nopeak_mask
+        return src_mask, tgt_mask
+
+    def forward(self, src: torch.Tensor, tgt: torch.Tensor) -> torch.Tensor:
+        src_mask, tgt_mask = self.generate_mask(src, tgt)
+        src_embedding = self.dropout(
+            self.positional_encoding(self.encoder_embedding(src))
+        )
+        tgt_embedding = self.dropout(
+            self.positional_encoding(self.decoder_embedding(tgt))
+        )
+
+        enc_output = src_embedding
+        for enc_layer in self.encoder_layers:
+            enc_output = enc_layer(enc_output, src_mask)
+
+        dec_output = tgt_embedding
+        for dec_layer in self.decoder_layers:
+            dec_output = dec_layer(dec_output, enc_output, src_mask, tgt_mask)
+
+        return self.linear(dec_output)
+
+
+if __name__ == "__main__":
+    SRC_VOCAB_SIZE = 5000
+    TGT_VOCAB_SIZE = 5000
+
+    transformer = Transformer(
+        src_vocab_size=SRC_VOCAB_SIZE,
+        tgt_vocab_size=TGT_VOCAB_SIZE,
+        d_model=512,
+        num_heads=8,
+        num_layers=6,
+        d_ff=2048,
+        max_seq_length=100,
+        dropout=0.1,
+    )
+
+    # Generate random sample data of shape (batch_size, seq_length)
+    src_data = torch.randint(1, SRC_VOCAB_SIZE, (64, 100))
+    tgt_data = torch.randint(1, TGT_VOCAB_SIZE, (64, 100))
+
+    # "Train" the model
+    criterion = nn.CrossEntropyLoss(ignore_index=0)
+    optimizer = torch.optim.Adam(
+        transformer.parameters(), lr=1e-3, betas=(0.9, 0.98), eps=1e-9
+    )
+
+    transformer.train()
+
+    for epoch in range(100):
+        optimizer.zero_grad()
+        output = transformer(src_data, tgt_data[:, :-1])
+        loss = criterion(
+            output.contiguous().view(-1, TGT_VOCAB_SIZE),
+            tgt_data[:, 1:].contiguous().view(-1),
+        )
+        loss.backward()
+        optimizer.step()
+
+        print(f"Epoch: {epoch+1:4d}    Loss: {loss.item():>6f}")
