@@ -20,6 +20,7 @@ class PositionWiseFeedForward(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Make predictions considering input position."""
         return self.fc2(self.relu(self.fc1(x)))
 
 
@@ -45,6 +46,7 @@ class PositionalEncoding(nn.Module):
         self.register_buffer("pe", pe.unsqueeze(0))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Encode vector with position information."""
         return x + self.pe[:, : x.size(1)]
 
 
@@ -61,6 +63,7 @@ class EncoderLayer(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
+        """Encode input sequence with self-attention and feed-forward network."""
         attention_output = self.self_attention(x, x, x, mask=mask)
         x = self.norm_1(x + self.dropout(attention_output))
         ff_output = self.feed_forward(x)
@@ -98,6 +101,7 @@ class DecoderLayer(nn.Module):
         src_mask: torch.Tensor,
         tgt_mask: torch.Tensor = None,
     ) -> torch.Tensor:
+        """Decode input sequence with self-attention, cross-attention, and feed-forward network."""
         attention_output = self.self_attention(x, x, x, mask=tgt_mask)
         x = self.norm_1(x + self.dropout(attention_output))
         attention_output = self.cross_attention(
@@ -150,6 +154,7 @@ class Transformer(nn.Module):
     def generate_mask(
         self, src: torch.Tensor, tgt: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Generate source and target masks."""
         src_mask = (src != 0).unsqueeze(1).unsqueeze(2)
         tgt_mask = (tgt != 0).unsqueeze(1).unsqueeze(3)
         seq_length = tgt.size(1)
@@ -160,6 +165,7 @@ class Transformer(nn.Module):
         return src_mask, tgt_mask
 
     def forward(self, src: torch.Tensor, tgt: torch.Tensor) -> torch.Tensor:
+        """Process source and target sequences through the transformer model."""
         src_mask, tgt_mask = self.generate_mask(src, tgt)
         src_embedding = self.dropout(
             self.positional_encoding(self.encoder_embedding(src))
