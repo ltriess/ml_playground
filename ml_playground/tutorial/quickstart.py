@@ -59,7 +59,7 @@ def run_train_epoch(
         optimizer.zero_grad()  # reset the gradients to zero
 
         if batch % 100 == 0:
-            loss, current = loss.item(), (batch * 1) * len(x)
+            loss, current = loss.item(), (batch + 1) * len(x)
             logger.info(f"Train loss: {loss:>7f} [{current:>5d}/{size:>5d}]")
 
 
